@@ -39,6 +39,31 @@ ask CT_RAM "Memory in MB" "2048"
 ask CT_CORES "CPU cores" "2"
 ask CT_BRIDGE "Network bridge" "vmbr0"
 echo
+# Its address is settled here, before anything is installed: with no tunnel, patch records the
+# address it is reached on (for links in emails and on labels), so it must not change later.
+say "Its address on your network:"
+say "  1) Automatic (DHCP)   reserve it on your router afterwards"
+say "  2) Fixed              you choose it now"
+ask NET_MODE "Choose 1 or 2" 1
+CT_IP=dhcp; CT_GW=''
+if [ "$NET_MODE" = 2 ]; then
+  GW_DEFAULT=$(ip -4 route show default dev "$CT_BRIDGE" 2>/dev/null | awk '{print $3; exit}' || true)
+  HOST_PREFIX=$(ip -4 -o addr show dev "$CT_BRIDGE" 2>/dev/null | awk '{split($4, a, "/"); print a[2]; exit}' || true)
+  while :; do
+    ask CT_IP_IN "Address, e.g. 192.168.1.50"
+    CT_IP=$CT_IP_IN; unset CT_IP_IN
+    # A bare address takes the host's own network size (/24 on most home networks).
+    case "$CT_IP" in */*) ;; *) CT_IP="$CT_IP/${HOST_PREFIX:-24}" ;; esac
+    if ! printf '%s' "$CT_IP" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$'; then say "That is not an address like 192.168.1.50."; continue; fi
+    # Something already answering there would fight the container for the address.
+    if ping -c1 -W1 "${CT_IP%/*}" >/dev/null 2>&1; then say "Something on your network already answers at ${CT_IP%/*}. Choose another."; continue; fi
+    break
+  done
+  ask CT_GW "Gateway (your router)" "$GW_DEFAULT"
+  [ -n "$CT_GW" ] || die "A gateway is needed for a fixed address."
+fi
+NET0="name=eth0,bridge=$CT_BRIDGE,ip=$CT_IP${CT_GW:+,gw=$CT_GW}"
+echo
 say "patch is private: you need the access code you were given (it starts ghp_)."
 ask PATCH_ACCESS_CODE "Access code" "" secret
 [ -n "$PATCH_ACCESS_CODE" ] || die "An access code is needed."
@@ -56,6 +81,9 @@ if [ "$MODE" = 2 ]; then
 fi
 
 # ── Template ────────────────────────────────────────────────────────────────────────────────────
+# The host's language settings pass into the container through pct exec, where Debian has none of
+# them installed and every apt and perl step complains. Plain UTF-8 is there in any Debian.
+export LC_ALL=C.UTF-8
 say "Finding the Debian template…"
 pveam update >/dev/null 2>&1 || true
 # awk, not grep: under pipefail a grep with no match would end the script silently.
@@ -72,7 +100,7 @@ say "Creating container $CTID ($CT_NAME)…"
 # Unprivileged, with nesting and keyctl: what Docker needs inside an LXC, and no more.
 pct create "$CTID" "$TMPL_STORAGE:vztmpl/$TEMPLATE" --arch "$ARCH" \
   --hostname "$CT_NAME" --cores "$CT_CORES" --memory "$CT_RAM" --swap 512 \
-  --rootfs "$CT_STORAGE:$CT_DISK" --net0 "name=eth0,bridge=$CT_BRIDGE,ip=dhcp" \
+  --rootfs "$CT_STORAGE:$CT_DISK" --net0 "$NET0" \
   --unprivileged 1 --features nesting=1,keyctl=1 --onboot 1 --ostype debian \
   --tags patch --description "patch. Manage from inside: pct enter $CTID, then patchctl help" >/dev/null
 pct start "$CTID"
@@ -80,7 +108,7 @@ pct start "$CTID"
 say "Waiting for its network…"
 for i in $(seq 1 60); do
   pct exec "$CTID" -- getent hosts deb.debian.org >/dev/null 2>&1 && break
-  [ "$i" = 60 ] && die "Container $CTID has no network after two minutes. Check the bridge ($CT_BRIDGE) and DHCP."
+  [ "$i" = 60 ] && die "Container $CTID has no network after two minutes. Check the bridge ($CT_BRIDGE)$([ "$CT_IP" = dhcp ] && echo ' and DHCP' || echo ", the address $CT_IP and the gateway $CT_GW")."
   sleep 2
 done
 
@@ -104,5 +132,5 @@ pct exec "$CTID" -- bash /root/install.sh || {
 IP=$(pct exec "$CTID" -- hostname -I | awk '{print $1}')
 echo
 bold "✓ Container $CTID is running patch at http://$IP:3000"
-say "Give it a fixed address: reserve $IP for '$CT_NAME' on your router."
+[ "$CT_IP" = dhcp ] && say "Give it a fixed address: reserve $IP for '$CT_NAME' on your router."
 say "Manage it from here:  pct enter $CTID   then   patchctl help"
