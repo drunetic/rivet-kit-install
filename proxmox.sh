@@ -59,15 +59,18 @@ fi
 say "Finding the Debian template…"
 pveam update >/dev/null 2>&1 || true
 # awk, not grep: under pipefail a grep with no match would end the script silently.
-TEMPLATE=$(pveam available --section system 2>/dev/null | awk '$2 ~ /^debian-13-standard/ {print $2}' | sort -V | tail -1)
-[ -n "$TEMPLATE" ] || TEMPLATE=$(pveam available --section system 2>/dev/null | awk '$2 ~ /^debian-12-standard/ {print $2}' | sort -V | tail -1)
+# The template for THIS host's processor: Proxmox now lists arm64 templates too, and one of those on
+# an Intel/AMD host makes a container that cannot start ("Failed to spawn container").
+ARCH=$(dpkg --print-architecture 2>/dev/null || echo amd64)
+TEMPLATE=$(pveam available --section system 2>/dev/null | awk -v a="_$ARCH." '$2 ~ /^debian-13-standard/ && index($2, a) {print $2}' | sort -V | tail -1)
+[ -n "$TEMPLATE" ] || TEMPLATE=$(pveam available --section system 2>/dev/null | awk -v a="_$ARCH." '$2 ~ /^debian-12-standard/ && index($2, a) {print $2}' | sort -V | tail -1)
 [ -n "$TEMPLATE" ] || die "Could not find a Debian template (pveam available)."
 pveam list "$TMPL_STORAGE" | awk -v t="$TEMPLATE" 'index($1, t) {f=1} END {exit !f}' || { say "Downloading $TEMPLATE…"; pveam download "$TMPL_STORAGE" "$TEMPLATE" >/dev/null; }
 
 # ── Container ───────────────────────────────────────────────────────────────────────────────────
 say "Creating container $CTID ($CT_NAME)…"
 # Unprivileged, with nesting and keyctl: what Docker needs inside an LXC, and no more.
-pct create "$CTID" "$TMPL_STORAGE:vztmpl/$TEMPLATE" \
+pct create "$CTID" "$TMPL_STORAGE:vztmpl/$TEMPLATE" --arch "$ARCH" \
   --hostname "$CT_NAME" --cores "$CT_CORES" --memory "$CT_RAM" --swap 512 \
   --rootfs "$CT_STORAGE:$CT_DISK" --net0 "name=eth0,bridge=$CT_BRIDGE,ip=dhcp" \
   --unprivileged 1 --features nesting=1,keyctl=1 --onboot 1 --ostype debian \
