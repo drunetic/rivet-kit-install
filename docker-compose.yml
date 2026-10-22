@@ -1,12 +1,15 @@
-# ── Rivet Kit ────────────────────────────────────────────────────────────────
+# ── patch. ───────────────────────────────────────────────────────────────────
 # Runs the published images; nothing is built on this box. The installers (install/ in this repo,
 # published to drunetic/rivet-kit-install) write this file and a .env beside it, log Docker in to
 # GitHub's registry with the business's access code, and start it. Run compose from this folder.
 #
+# Settings are PATCH_*; the RIVET_* names from before the rename are still read. The database user
+# and name stay `rivet`/`rivetkit`: they live inside existing data volumes, and nobody sees them.
+#
 # Developers building from source: docker compose -f docker-compose.yml -f compose.build.yml up --build
 services:
   app:
-    image: ${RIVET_IMAGE:-ghcr.io/drunetic/rivet-kit}:${RIVET_VERSION:-latest}
+    image: ${PATCH_IMAGE:-${RIVET_IMAGE:-ghcr.io/drunetic/patch}}:${PATCH_VERSION:-${RIVET_VERSION:-latest}}
     restart: unless-stopped
     # An explicit list rather than the whole .env: the internet-facing app has no business holding
     # the tunnel token or the database superuser settings. Add a line here for any new setting.
@@ -20,9 +23,9 @@ services:
       AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN:-}
       SESSION_SECRET: ${SESSION_SECRET:-}
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
-      RIVET_ACCESS_CODE: ${RIVET_ACCESS_CODE:-}
-      RIVET_IMAGE: ${RIVET_IMAGE:-ghcr.io/drunetic/rivet-kit}
-      RIVET_VERSION: ${RIVET_VERSION:-latest}
+      PATCH_ACCESS_CODE: ${PATCH_ACCESS_CODE:-${RIVET_ACCESS_CODE:-}}
+      PATCH_IMAGE: ${PATCH_IMAGE:-${RIVET_IMAGE:-ghcr.io/drunetic/patch}}
+      PATCH_VERSION: ${PATCH_VERSION:-${RIVET_VERSION:-latest}}
       TZ: ${TZ:-Europe/London}
       FILE_STORAGE_DIR: /data/files
       UPDATER_REQUEST_DIR: /data/updater-request
@@ -56,7 +59,7 @@ services:
   # image). That folder is on the same disk as the data, so it is the first copy, not the backup:
   # sync it off the box.
   backup:
-    image: ${RIVET_IMAGE:-ghcr.io/drunetic/rivet-kit}:${RIVET_VERSION:-latest}
+    image: ${PATCH_IMAGE:-${RIVET_IMAGE:-ghcr.io/drunetic/patch}}:${PATCH_VERSION:-${RIVET_VERSION:-latest}}
     restart: unless-stopped
     user: root
     entrypoint: ["/bin/sh", "/app/scripts/backup.sh"]
@@ -81,7 +84,7 @@ services:
   # The compose folder is mounted at the same path as on the host so compose resolves ./backups
   # the same way, and Docker's login is mounted so it can pull with this business's access code.
   updater:
-    image: ${RIVET_UPDATER_IMAGE:-ghcr.io/drunetic/rivet-kit-updater}:latest
+    image: ${PATCH_UPDATER_IMAGE:-${RIVET_UPDATER_IMAGE:-ghcr.io/drunetic/patch-updater}}:latest
     restart: unless-stopped
     environment:
       PROJECT_DIR: ${PWD}

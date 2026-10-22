@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ── Rivet Kit for Proxmox VE: one line in the Proxmox host's shell ────────────────────────────
+# ── patch. for Proxmox VE: one line in the Proxmox host's shell ────────────────────────────
 #
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/drunetic/rivet-kit-install/main/proxmox.sh)"
 #
@@ -8,7 +8,7 @@
 # and can cut the other guests off the network.
 set -euo pipefail
 
-SOURCE=${RK_SOURCE:-https://raw.githubusercontent.com/drunetic/rivet-kit-install/main}
+SOURCE=${PATCH_SOURCE:-https://raw.githubusercontent.com/drunetic/rivet-kit-install/main}
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 say() { printf '  %s\n' "$*"; }
 die() { printf '\n\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
@@ -22,8 +22,8 @@ ask() {  # ask VAR "Question" [default] [secret]
 
 command -v pct >/dev/null && command -v pveam >/dev/null || die "This is for the Proxmox host's shell. On any other Debian/Ubuntu machine use install.sh."
 [ "$(id -u)" = 0 ] || die "Run as root."
-bold "Rivet Kit for Proxmox"
-say "This creates a small container for Rivet Kit. Press Enter to accept a [default]."
+bold "patch. for Proxmox"
+say "This creates a small container for patch. Press Enter to accept a [default]."
 echo
 
 CTID_DEFAULT=$(pvesh get /cluster/nextid)
@@ -32,27 +32,27 @@ TMPL_STORAGE=$(pvesm status -content vztmpl 2>/dev/null | awk 'NR>1 && $3=="acti
 [ -n "$TMPL_STORAGE" ] || die "No storage on this host accepts container templates (vztmpl)."
 
 ask CTID "Container ID" "$CTID_DEFAULT"
-ask CT_NAME "Name" "rivet-kit"
+ask CT_NAME "Name" "patch"
 ask CT_STORAGE "Storage for its disk" "${ROOT_STORAGE_DEFAULT:-local-lvm}"
 ask CT_DISK "Disk size in GB (photos are what grow)" "16"
 ask CT_RAM "Memory in MB" "2048"
 ask CT_CORES "CPU cores" "2"
 ask CT_BRIDGE "Network bridge" "vmbr0"
 echo
-say "Rivet Kit is private: you need the access code you were given (it starts ghp_)."
-ask RK_ACCESS_CODE "Access code" "" secret
-[ -n "$RK_ACCESS_CODE" ] || die "An access code is needed."
+say "patch is private: you need the access code you were given (it starts ghp_)."
+ask PATCH_ACCESS_CODE "Access code" "" secret
+[ -n "$PATCH_ACCESS_CODE" ] || die "An access code is needed."
 echo
 say "How will people reach it?"
-say "  1) Only on this network            (you can add remote access later: rivetkit tunnel)"
+say "  1) Only on this network            (you can add remote access later: patchctl tunnel)"
 say "  2) From anywhere, via a Cloudflare Tunnel (needed for the phone camera scanner)"
 ask MODE "Choose 1 or 2" 1
-RK_TUNNEL=''; RK_URL=''
+PATCH_TUNNEL=''; PATCH_URL=''
 if [ "$MODE" = 2 ]; then
   say "In Cloudflare: Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared → Docker."
   say "Copy the whole 'docker run …' command it shows and paste it here."
-  ask RK_TUNNEL "Cloudflare's command"
-  ask RK_URL "The address you will give it in Cloudflare, e.g. kit.yourdomain.co.uk"
+  ask PATCH_TUNNEL "Cloudflare's command"
+  ask PATCH_URL "The address you will give it in Cloudflare, e.g. kit.yourdomain.co.uk"
 fi
 
 # ── Template ────────────────────────────────────────────────────────────────────────────────────
@@ -71,7 +71,7 @@ pct create "$CTID" "$TMPL_STORAGE:vztmpl/$TEMPLATE" \
   --hostname "$CT_NAME" --cores "$CT_CORES" --memory "$CT_RAM" --swap 512 \
   --rootfs "$CT_STORAGE:$CT_DISK" --net0 "name=eth0,bridge=$CT_BRIDGE,ip=dhcp" \
   --unprivileged 1 --features nesting=1,keyctl=1 --onboot 1 --ostype debian \
-  --tags rivet-kit --description "Rivet Kit. Manage from inside: pct enter $CTID, then rivetkit help" >/dev/null
+  --tags patch --description "patch. Manage from inside: pct enter $CTID, then patchctl help" >/dev/null
 pct start "$CTID"
 
 say "Waiting for its network…"
@@ -88,7 +88,7 @@ pct exec "$CTID" -- bash -c "curl -fsSL '$SOURCE/install.sh' -o /root/install.sh
 # Answers go in as environment variables: pct exec gives the installer no terminal to ask on. They
 # are exported rather than put on the command line (pct exec passes the environment through), so
 # the access code and tunnel token never appear in the host's process list.
-export RK_ACCESS_CODE RK_TUNNEL RK_URL RK_SOURCE="$SOURCE"
+export PATCH_ACCESS_CODE PATCH_TUNNEL PATCH_URL PATCH_SOURCE="$SOURCE"
 pct exec "$CTID" -- bash /root/install.sh || {
   echo
   say "The install inside the container stopped. Its output is above."
@@ -100,6 +100,6 @@ pct exec "$CTID" -- bash /root/install.sh || {
 
 IP=$(pct exec "$CTID" -- hostname -I | awk '{print $1}')
 echo
-bold "✓ Container $CTID is running Rivet Kit at http://$IP:3000"
+bold "✓ Container $CTID is running patch at http://$IP:3000"
 say "Give it a fixed address: reserve $IP for '$CT_NAME' on your router."
-say "Manage it from here:  pct enter $CTID   then   rivetkit help"
+say "Manage it from here:  pct enter $CTID   then   patchctl help"

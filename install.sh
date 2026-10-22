@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
-# ── Rivet Kit installer for any Debian or Ubuntu machine (VM, LXC, mini PC, Hyper-V guest) ─────
+# ── patch. installer for any Debian or Ubuntu machine (VM, LXC, mini PC, Hyper-V guest) ─────
 #
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/drunetic/rivet-kit-install/main/install.sh)"
 #
-# Installs Docker if it is missing, asks for the business's access code and how Rivet Kit will be
-# reached, writes /opt/rivet-kit/{docker-compose.yml,.env}, starts it, and adds the `rivetkit`
+# Installs Docker if it is missing, asks for the business's access code and how patch will be
+# reached, writes /opt/patch/{docker-compose.yml,.env}, starts it, and adds the `patchctl`
 # command for later jobs (update, backup, tunnel, logs). Safe to run again: an existing .env is kept.
+# (`patchctl`, not `patch`: /usr/bin/patch is the standard diff tool that apt and friends rely on.)
 #
-# Non-interactive (the Proxmox script uses this): set RK_ACCESS_CODE, and optionally RK_TUNNEL
-# (Cloudflare's whole "docker run … --token …" command, or just the token), RK_URL, RK_PORT, RK_DIR.
+# Non-interactive (the Proxmox script uses this): set PATCH_ACCESS_CODE, and optionally PATCH_TUNNEL
+# (Cloudflare's whole "docker run … --token …" command, or just the token), PATCH_URL, PATCH_PORT, PATCH_DIR.
 set -euo pipefail
 
-SOURCE=${RK_SOURCE:-https://raw.githubusercontent.com/drunetic/rivet-kit-install/main}
-DIR=${RK_DIR:-/opt/rivet-kit}
-REGISTRY_USER=${RK_REGISTRY_USER:-drunetic}
-PORT=${RK_PORT:-3000}
+SOURCE=${PATCH_SOURCE:-https://raw.githubusercontent.com/drunetic/rivet-kit-install/main}
+DIR=${PATCH_DIR:-/opt/patch}
+REGISTRY_USER=${PATCH_REGISTRY_USER:-drunetic}
+PORT=${PATCH_PORT:-3000}
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 say() { printf '  %s\n' "$*"; }
@@ -38,7 +39,7 @@ token_from() {  # accepts Cloudflare's whole docker command or the bare token
 }
 
 [ "$(id -u)" = 0 ] || die "Run this as root (on Debian: su - first)."
-bold "Rivet Kit installer"
+bold "patch. installer"
 
 # ── Docker ──────────────────────────────────────────────────────────────────────────────────────
 if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
@@ -51,10 +52,10 @@ docker info >/dev/null 2>&1 || die "Docker is installed but not running. Check: 
 
 # ── Access code ─────────────────────────────────────────────────────────────────────────────────
 echo
-say "Rivet Kit is private. You need the access code you were given (it starts ghp_)."
-ask RK_ACCESS_CODE "Access code" "" secret
-[ -n "$RK_ACCESS_CODE" ] || die "An access code is needed to download Rivet Kit."
-printf '%s' "$RK_ACCESS_CODE" | docker login ghcr.io -u "$REGISTRY_USER" --password-stdin >/dev/null 2>&1 \
+say "patch is private. You need the access code you were given (it starts ghp_)."
+ask PATCH_ACCESS_CODE "Access code" "" secret
+[ -n "$PATCH_ACCESS_CODE" ] || die "An access code is needed to download patch."
+printf '%s' "$PATCH_ACCESS_CODE" | docker login ghcr.io -u "$REGISTRY_USER" --password-stdin >/dev/null 2>&1 \
   || die "That access code was not accepted. Check it was copied whole, or ask for a new one."
 say "✓ Access code accepted"
 
@@ -65,36 +66,36 @@ IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 if [ -f .env ]; then
   say "Keeping the existing settings in $DIR/.env"
   # …except the access code just given, or Settings → Updates would keep using a revoked one.
-  setenv RIVET_ACCESS_CODE "$RK_ACCESS_CODE"
+  setenv PATCH_ACCESS_CODE "$PATCH_ACCESS_CODE"
 else
-  if [ -z "${RK_TUNNEL+x}" ]; then
+  if [ -z "${PATCH_TUNNEL+x}" ]; then
     echo
-    say "How will people reach Rivet Kit?"
-    say "  1) Only on this network, at http://$IP:$PORT   (you can add remote access later: rivetkit tunnel)"
+    say "How will people reach patch?"
+    say "  1) Only on this network, at http://$IP:$PORT   (you can add remote access later: patchctl tunnel)"
     say "  2) From anywhere, through a Cloudflare Tunnel   (needed for the phone camera scanner)"
     ask MODE "Choose 1 or 2" 1
-    RK_TUNNEL=''
+    PATCH_TUNNEL=''
     if [ "$MODE" = 2 ]; then
       say "In Cloudflare: Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared → Docker."
       say "Copy the whole 'docker run …' command it shows and paste it here."
-      ask RK_TUNNEL "Cloudflare's command"
+      ask PATCH_TUNNEL "Cloudflare's command"
     fi
   fi
-  TUNNEL_TOKEN=$( [ -n "$RK_TUNNEL" ] && token_from "$RK_TUNNEL" || true )
+  TUNNEL_TOKEN=$( [ -n "$PATCH_TUNNEL" ] && token_from "$PATCH_TUNNEL" || true )
   if [ -n "$TUNNEL_TOKEN" ]; then
     case "$TUNNEL_TOKEN" in eyJ*) ;; *) die "That does not look like a tunnel token (they start eyJ)." ;; esac
-    ask RK_URL "The address you will give it in Cloudflare, e.g. kit.yourdomain.co.uk"
-    RK_URL="https://${RK_URL#https://}"; RK_URL=${RK_URL%/}
+    ask PATCH_URL "The address you will give it in Cloudflare, e.g. kit.yourdomain.co.uk"
+    PATCH_URL="https://${PATCH_URL#https://}"; PATCH_URL=${PATCH_URL%/}
   else
-    RK_URL=${RK_URL:-http://$IP:$PORT}
+    PATCH_URL=${PATCH_URL:-http://$IP:$PORT}
   fi
   umask 077
   cat > .env <<EOF
-# Rivet Kit settings for this install. Keep a copy somewhere safe (a password manager).
-# Change with the rivetkit command (rivetkit help) or edit here and run: rivetkit restart
+# patch settings for this install. Keep a copy somewhere safe (a password manager).
+# Change with the patchctl command (patchctl help) or edit here and run: patchctl restart
 POSTGRES_PASSWORD=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
-RIVET_ACCESS_CODE=$RK_ACCESS_CODE
-PUBLIC_BASE_URL=$RK_URL
+PATCH_ACCESS_CODE=$PATCH_ACCESS_CODE
+PUBLIC_BASE_URL=$PATCH_URL
 APP_PORT=$PORT
 TZ=${TZ:-Europe/London}
 TRUST_CLOUDFLARE_HEADERS=$([ -n "$TUNNEL_TOKEN" ] && echo 1 || echo 0)
@@ -106,12 +107,12 @@ fi
 
 # ── Files and start ─────────────────────────────────────────────────────────────────────────────
 curl -fsSL "$SOURCE/docker-compose.yml" -o docker-compose.yml.new && mv docker-compose.yml.new docker-compose.yml
-curl -fsSL "$SOURCE/rivetkit" -o /usr/local/bin/rivetkit && chmod +x /usr/local/bin/rivetkit
+curl -fsSL "$SOURCE/patchctl" -o /usr/local/bin/patchctl && chmod +x /usr/local/bin/patchctl
 # Backups hold the database and the app's own secrets: root only.
 mkdir -p backups && chmod 0700 backups
 PORT=$(grep '^APP_PORT=' .env | cut -d= -f2- || true); PORT=${PORT:-3000}
 echo
-say "Downloading Rivet Kit (a minute or two the first time)…"
+say "Downloading patch (a minute or two the first time)…"
 docker compose pull -q
 docker compose up -d --remove-orphans
 
@@ -120,13 +121,13 @@ for _ in $(seq 1 60); do
   if curl -fsS -m 3 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then
     URL=$(grep '^PUBLIC_BASE_URL=' .env | cut -d= -f2-)
     echo
-    bold "✓ Rivet Kit is running"
+    bold "✓ patch. is running"
     say "On this network:  http://$IP:$PORT"
     [ "${URL#https://}" != "$URL" ] && say "From anywhere:    $URL   (once the hostname is added in Cloudflare)"
     say "Open it and the setup page makes the first account."
-    say "Later jobs: rivetkit update | backup | tunnel | logs | status   (rivetkit help)"
+    say "Later jobs: patchctl update | backup | tunnel | logs | status   (patchctl help)"
     exit 0
   fi
   sleep 3
 done
-die "Rivet Kit did not answer within three minutes. See: rivetkit logs"
+die "patch did not answer within three minutes. See: patchctl logs"

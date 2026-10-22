@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# rivetkit: the jobs you would otherwise need Docker commands for. Installed by install.sh.
+# patchctl: the jobs you would otherwise need Docker commands for. Installed by install.sh.
 set -euo pipefail
-DIR=${RK_DIR:-/opt/rivet-kit}
-REGISTRY_USER=${RK_REGISTRY_USER:-drunetic}
-cd "$DIR" 2>/dev/null || { echo "No Rivet Kit install in $DIR"; exit 1; }
+# The install folder: /opt/patch, or /opt/rivet-kit for an install from before the rename.
+DIR=${PATCH_DIR:-$( [ -d /opt/patch ] || [ ! -d /opt/rivet-kit ] && echo /opt/patch || echo /opt/rivet-kit )}
+REGISTRY_USER=${PATCH_REGISTRY_USER:-drunetic}
+# .env from before the rename says RIVET_ACCESS_CODE; replace either.
+CODE_KEY=$(grep -q '^RIVET_ACCESS_CODE=' "$DIR/.env" 2>/dev/null && ! grep -q '^PATCH_ACCESS_CODE=' "$DIR/.env" && echo RIVET_ACCESS_CODE || echo PATCH_ACCESS_CODE)
+cd "$DIR" 2>/dev/null || { echo "No patch install in $DIR"; exit 1; }
 [ "$(id -u)" = 0 ] || { echo "Run as root."; exit 1; }
 
 setenv() {  # setenv NAME value — replaces the line in .env, or adds it
@@ -14,7 +17,7 @@ setenv() {  # setenv NAME value — replaces the line in .env, or adds it
 }
 getenv() { grep "^$1=" .env 2>/dev/null | tail -1 | cut -d= -f2-; }
 health() { curl -fsS -m 3 "http://127.0.0.1:$(getenv APP_PORT || echo 3000)/api/health" 2>/dev/null; }
-wait_up() { for _ in $(seq 1 60); do health >/dev/null && { echo "✓ Running: $(health)"; return 0; }; sleep 3; done; echo "✗ Not answering. See: rivetkit logs"; return 1; }
+wait_up() { for _ in $(seq 1 60); do health >/dev/null && { echo "✓ Running: $(health)"; return 0; }; sleep 3; done; echo "✗ Not answering. See: patchctl logs"; return 1; }
 
 case "${1:-help}" in
   status)
@@ -30,8 +33,8 @@ case "${1:-help}" in
     docker compose exec -T backup sh /app/scripts/backup.sh now && ls -lh backups | tail -4 ;;
   restore)
     dump=${2:-}; files=${3:-}
-    [ -f "$dump" ] || { echo "Usage: rivetkit restore backups/rivetkit-<date>.dump [backups/files-<date>.tar.gz]"; exit 1; }
-    echo "This REPLACES everything in Rivet Kit with that backup. Type RESTORE to carry on:"; read -r a
+    [ -f "$dump" ] || { echo "Usage: patchctl restore backups/patch-<date>.dump [backups/files-<date>.tar.gz]"; exit 1; }
+    echo "This REPLACES everything in patch with that backup. Type RESTORE to carry on:"; read -r a
     [ "$a" = RESTORE ] || { echo "Nothing changed."; exit 1; }
     docker compose stop app backup
     docker compose exec -T db psql -U rivet -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS rivetkit WITH (FORCE)" -c "CREATE DATABASE rivetkit OWNER rivet"
@@ -53,25 +56,25 @@ case "${1:-help}" in
     docker compose up -d --remove-orphans
     echo "✓ Tunnel connector started. In Cloudflare, add a route: hostname $host → HTTP, app:3000" ;;
   url)
-    [ -n "${2:-}" ] || { echo "Usage: rivetkit url https://kit.yourdomain.co.uk"; exit 1; }
+    [ -n "${2:-}" ] || { echo "Usage: patchctl url https://kit.yourdomain.co.uk"; exit 1; }
     setenv PUBLIC_BASE_URL "${2%/}"; docker compose up -d && wait_up ;;
   access-code)
     read -rsp "New access code (hidden as you type): " code; echo
     printf '%s' "$code" | docker login ghcr.io -u "$REGISTRY_USER" --password-stdin >/dev/null || { echo "Not accepted. Nothing changed."; exit 1; }
-    setenv RIVET_ACCESS_CODE "$code"; docker compose up -d app && echo "✓ Access code updated" ;;
+    setenv "$CODE_KEY" "$code"; docker compose up -d app && echo "✓ Access code updated" ;;
   logs) docker compose logs --tail "${3:-100}" -f "${2:-app}" ;;
   restart) docker compose up -d --remove-orphans && wait_up ;;
   *)
     cat <<'EOF'
-rivetkit status              what is running, and the address
-rivetkit update              back up, download the latest version, restart
-rivetkit backup              make a backup now (they also run nightly, into /opt/rivet-kit/backups)
-rivetkit restore DUMP [FILES]  put a backup back
-rivetkit tunnel              add or change the Cloudflare Tunnel (paste Cloudflare's command)
-rivetkit url ADDRESS         change the public address (QR labels use it)
-rivetkit access-code         replace the access code
-rivetkit logs [service]      follow the logs (app, db, backup, updater, cloudflared)
-rivetkit restart             apply changes made to .env
+patchctl status              what is running, and the address
+patchctl update              back up, download the latest version, restart
+patchctl backup              make a backup now (they also run nightly, into /opt/patch/backups)
+patchctl restore DUMP [FILES]  put a backup back
+patchctl tunnel              add or change the Cloudflare Tunnel (paste Cloudflare's command)
+patchctl url ADDRESS         change the public address (QR labels use it)
+patchctl access-code         replace the access code
+patchctl logs [service]      follow the logs (app, db, backup, updater, cloudflared)
+patchctl restart             apply changes made to .env
 EOF
     ;;
 esac
