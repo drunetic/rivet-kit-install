@@ -63,6 +63,14 @@ if [ "$NET_MODE" = 2 ]; then
   [ -n "$CT_GW" ] || die "A gateway is needed for a fixed address."
 fi
 NET0="name=eth0,bridge=$CT_BRIDGE,ip=$CT_IP${CT_GW:+,gw=$CT_GW}"
+# A container copies the host's DNS servers unless told otherwise. Some only work on the host
+# itself: Tailscale's 100.100.100.100 (MagicDNS) and local resolvers on 127.x. Inside the container
+# those fail, or work only now and then, and patch cannot reach GitHub to check for updates.
+CT_DNS=''
+if awk '$1=="nameserver" {print $2}' /etc/resolv.conf 2>/dev/null | grep -Eq '^(100\.100\.100\.100|127\.|::1$|fd7a:115c:a1e0:)'; then
+  CT_DNS="1.1.1.1 9.9.9.9"
+  say "This host's DNS only works on the host (Tailscale or a local resolver), so the container uses $CT_DNS."
+fi
 echo
 say "patch is private: you need the access code you were given (it starts ghp_)."
 ask PATCH_ACCESS_CODE "Access code" "" secret
@@ -101,6 +109,7 @@ say "Creating container $CTID ($CT_NAME)…"
 pct create "$CTID" "$TMPL_STORAGE:vztmpl/$TEMPLATE" --arch "$ARCH" \
   --hostname "$CT_NAME" --cores "$CT_CORES" --memory "$CT_RAM" --swap 512 \
   --rootfs "$CT_STORAGE:$CT_DISK" --net0 "$NET0" \
+  ${CT_DNS:+--nameserver "$CT_DNS"} \
   --unprivileged 1 --features nesting=1,keyctl=1 --onboot 1 --ostype debian \
   --tags patch --description "patch. Manage from inside: pct enter $CTID, then patchctl help" >/dev/null
 pct start "$CTID"
