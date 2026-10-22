@@ -27,6 +27,7 @@ services:
       PATCH_IMAGE: ${PATCH_IMAGE:-${RIVET_IMAGE:-ghcr.io/drunetic/patch}}
       PATCH_VERSION: ${PATCH_VERSION:-${RIVET_VERSION:-latest}}
       TZ: ${TZ:-Europe/London}
+      DIGEST_HOUR: ${DIGEST_HOUR:-7}
       FILE_STORAGE_DIR: /data/files
       UPDATER_REQUEST_DIR: /data/updater-request
       UPDATER_STATUS_DIR: /data/updater-status
