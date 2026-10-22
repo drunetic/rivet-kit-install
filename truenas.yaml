@@ -1,0 +1,82 @@
+# ── Rivet Kit for TrueNAS SCALE (24.10 or later) ─────────────────────────────────────────────
+#
+# 1. Apps → Configuration → Manage Container Image Registries (wording varies by version) → Add:
+#      Registry: ghcr.io    Username: drunetic    Password: your access code (ghp_…)
+# 2. Apps → Discover Apps → ⋮ → Install via YAML. Name it rivet-kit and paste this file.
+# 3. Before saving, replace every CHANGE-ME below. The database password appears three times and
+#    must match; make it long and random, letters and numbers only.
+# 4. Open http://<truenas-ip>:3000 and the setup page makes the first account.
+#
+# Updates: Settings → Updates in Rivet Kit says when one is out; install it from TrueNAS
+# (Apps → rivet-kit → Update, or Edit → Save to pull the latest image).
+# Backups: nightly into the backups dataset below; snapshot or replicate that dataset off the box.
+services:
+  app:
+    image: ghcr.io/drunetic/rivet-kit:latest
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://rivet:CHANGE-ME-database-password@db:5432/rivetkit
+      RIVET_ACCESS_CODE: CHANGE-ME-access-code
+      PUBLIC_BASE_URL: http://CHANGE-ME-truenas-ip:3000
+      FILE_STORAGE_DIR: /data/files
+      TZ: Europe/London
+      # Behind a Cloudflare Tunnel, set these and add the cloudflared service at the bottom:
+      # PUBLIC_BASE_URL: https://kit.yourdomain.co.uk
+      # TRUST_CLOUDFLARE_HEADERS: "1"
+    ports:
+      - "3000:3000"
+    volumes:
+      - files:/data/files
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rivet
+      POSTGRES_PASSWORD: CHANGE-ME-database-password
+      POSTGRES_DB: rivetkit
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rivet -d rivetkit"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backup:
+    image: ghcr.io/drunetic/rivet-kit:latest
+    pull_policy: always
+    restart: unless-stopped
+    user: root
+    entrypoint: ["/bin/sh", "/app/scripts/backup.sh"]
+    environment:
+      PGHOST: db
+      PGUSER: rivet
+      PGDATABASE: rivetkit
+      PGPASSWORD: CHANGE-ME-database-password
+      TZ: Europe/London
+      BACKUP_HOUR: "3"
+      BACKUP_KEEP_DAYS: "30"
+    volumes:
+      # A dataset you can snapshot and replicate, e.g. /mnt/tank/rivet-kit/backups
+      - /mnt/CHANGE-ME-pool/rivet-kit/backups:/backups
+      - files:/files
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # cloudflared:
+  #   image: cloudflare/cloudflared:latest
+  #   restart: unless-stopped
+  #   command: tunnel --no-autoupdate run
+  #   environment:
+  #     TUNNEL_TOKEN: paste the token (the eyJ… part of Cloudflare's docker command)
+  #   depends_on: [app]
+
+volumes:
+  pgdata:
+  files:
