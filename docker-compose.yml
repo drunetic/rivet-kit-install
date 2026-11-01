@@ -1,7 +1,8 @@
 # ── patch. ───────────────────────────────────────────────────────────────────
 # Runs the published images; nothing is built on this box. The installers (install/ in this repo,
 # published to drunetic/rivet-kit-install) write this file and a .env beside it, log Docker in to
-# GitHub's registry with the business's access code, and start it. Run compose from this folder.
+# HQ's image store with the company's licence key (or, for an older install, to GitHub's registry
+# with an access code), and start it. Run compose from this folder.
 #
 # Settings are PATCH_*; the RIVET_* names from before the rename are still read. The database user
 # and name stay `rivet`/`rivetkit`: they live inside existing data volumes, and nobody sees them.
@@ -88,7 +89,7 @@ services:
   # It holds the Docker socket, which is root on this box, so it has no ports and the app can only
   # leave it an "update" file in the request volume; the status volume is read-only to the app.
   # The compose folder is mounted at the same path as on the host so compose resolves ./backups
-  # the same way, and Docker's login is mounted so it can pull with this business's access code.
+  # the same way, and Docker's login is mounted so it can pull with this install's licence key (or access code).
   updater:
     image: ${PATCH_UPDATER_IMAGE:-${RIVET_UPDATER_IMAGE:-ghcr.io/drunetic/patch-updater}}:latest
     restart: unless-stopped

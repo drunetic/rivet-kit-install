@@ -14,6 +14,8 @@ setenv() {  # setenv NAME value — replaces the line in .env, or adds it
   grep -v "^$1=" .env > "$tmp" || true
   printf '%s=%s\n' "$1" "$2" >> "$tmp"
   cat "$tmp" > .env && rm -f "$tmp"
+  # It holds the database password and licence key: whoever made it, only root reads it.
+  chmod 600 .env
 }
 getenv() { grep "^$1=" .env 2>/dev/null | tail -1 | cut -d= -f2- || true; }
 health() { curl -fsS -m 3 "http://127.0.0.1:$(getenv APP_PORT || echo 3000)/api/health" 2>/dev/null; }
@@ -103,7 +105,26 @@ case "${1:-help}" in
     status=$(printf '%s' "$body" | sed -n 's/.*"status":"\([a-z]*\)".*/\1/p'); company=$(printf '%s' "$body" | sed -n 's/.*"company":"\([^"]*\)".*/\1/p')
     [ "$status" = revoked ] && { echo "That licence ($company) has been withdrawn. Nothing changed."; exit 1; }
     [ "$status" = ended ] && echo "Note: that licence ($company) has ended. patch works, but gets no updates until it is renewed."
+    images=$(printf '%s' "$body" | sed -n 's/.*"images":"\([a-z0-9.:-]*\)".*/\1/p')
     setenv PATCH_HQ_URL "$hq"; setenv PATCH_LICENCE_KEY "$key"
+    # An install still downloading from GitHub moves to HQ's image store here. HQ's newest release may
+    # be newer than what runs here, so: back up, log in, download with the new names, and only once
+    # that has worked write them into .env and restart. A failure leaves everything as it was.
+    if [ "$status" = valid ] && { [ -z "$images" ] || [ "$(getenv PATCH_IMAGE)" != "$images/patch" ]; }; then
+      if [ -z "$images" ]; then
+        echo "HQ has no images address set up yet, so updates still come from where they did. Ask whoever runs HQ, then run this again."
+      else
+        echo "Moving updates to HQ ($images). Backing up first…"
+        docker compose exec -T backup sh /app/scripts/backup.sh now >/dev/null || { echo "The backup did not complete, so updates stay where they were."; exit 1; }
+        printf '%s' "$key" | docker login "$images" -u licence --password-stdin >/dev/null 2>&1 \
+          || { echo "HQ's image store at $images did not accept the key; updates stay where they were."; exit 1; }
+        PATCH_IMAGE="$images/patch" PATCH_UPDATER_IMAGE="$images/patch-updater" docker compose pull -q \
+          || { echo "Could not download from $images; nothing was changed. See above, and try again."; exit 1; }
+        setenv PATCH_IMAGE "$images/patch"; setenv PATCH_UPDATER_IMAGE "$images/patch-updater"
+        docker compose up -d --remove-orphans && wait_up && echo "✓ Licensed to $company; updates now come from HQ."
+        exit $?
+      fi
+    fi
     docker compose up -d app && wait_up && echo "✓ Licensed to $company. It checks in within a couple of minutes: see Settings → Licence." ;;
   logs) docker compose logs --tail "${3:-100}" -f "${2:-app}" ;;
   restart) docker compose up -d --remove-orphans && wait_up ;;

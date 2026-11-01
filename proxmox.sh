@@ -87,6 +87,7 @@ if awk '$1=="nameserver" {print $2}' /etc/resolv.conf 2>/dev/null | grep -Eq '^(
 fi
 echo
 PATCH_TUNNEL=''; PATCH_URL=''; PATCH_IMAGES_URL=''; GITHUB_TOKEN=${GITHUB_TOKEN:-}; PATCH_ACCESS_CODE=${PATCH_ACCESS_CODE:-}
+PATCH_LICENCE_KEY=${PATCH_LICENCE_KEY:-}; PATCH_HQ_URL=${PATCH_HQ_URL:-}
 if [ "$ROLE" = hq ]; then
   say "HQ builds patch from its code, so it needs a GitHub token that can only read it:"
   say "GitHub → Settings → Developer settings → Fine-grained tokens; repository drunetic/Rivet-Kit only,"
@@ -104,9 +105,16 @@ if [ "$ROLE" = hq ]; then
     ask PATCH_IMAGES_URL "The images address, e.g. images.yourdomain.co.uk"
   fi
 else
-  say "patch is private: you need the access code you were given (it starts ghp_)."
-  ask PATCH_ACCESS_CODE "Access code" "" secret
-  [ -n "$PATCH_ACCESS_CODE" ] || die "An access code is needed."
+  say "patch is private: you need the licence key you were given (it starts patch_), and HQ's address."
+  ask KEY_IN "Licence key" "" secret
+  [ -n "$KEY_IN" ] || die "A licence key is needed."
+  # An access code (ghp_…) still works, for an install that is not licensed through HQ yet.
+  # Checked here, before a container is made for nothing.
+  case "$KEY_IN" in
+    ghp_*) PATCH_ACCESS_CODE=$KEY_IN ;;
+    patch_*) PATCH_LICENCE_KEY=$KEY_IN; ask PATCH_HQ_URL "HQ's address (e.g. hq.example.co.uk)"; [ -n "$PATCH_HQ_URL" ] || die "HQ's address is needed with a licence key." ;;
+    *) die "That does not look like a licence key (they start patch_)." ;;
+  esac
   echo
   say "How will people reach it?"
   say "  1) Only on this network            (you can add remote access later: patchctl tunnel)"
@@ -161,7 +169,7 @@ pct exec "$CTID" -- bash -c "curl -fsSL '$SOURCE/$INSTALLER' -o /root/install.sh
 # Answers go in as environment variables: pct exec gives the installer no terminal to ask on. They
 # are exported rather than put on the command line (pct exec passes the environment through), so
 # the access code and tunnel token never appear in the host's process list.
-export PATCH_ACCESS_CODE PATCH_TUNNEL PATCH_URL PATCH_IMAGES_URL GITHUB_TOKEN PATCH_SOURCE="$SOURCE"
+export PATCH_ACCESS_CODE PATCH_LICENCE_KEY PATCH_HQ_URL PATCH_TUNNEL PATCH_URL PATCH_IMAGES_URL GITHUB_TOKEN PATCH_SOURCE="$SOURCE"
 pct exec "$CTID" -- bash /root/install.sh || {
   echo
   say "The install inside the container stopped. Its output is above."
