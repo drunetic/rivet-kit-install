@@ -15,7 +15,7 @@ setenv() {  # setenv NAME value — replaces the line in .env, or adds it
   printf '%s=%s\n' "$1" "$2" >> "$tmp"
   cat "$tmp" > .env && rm -f "$tmp"
 }
-getenv() { grep "^$1=" .env 2>/dev/null | tail -1 | cut -d= -f2-; }
+getenv() { grep "^$1=" .env 2>/dev/null | tail -1 | cut -d= -f2- || true; }
 health() { curl -fsS -m 3 "http://127.0.0.1:$(getenv APP_PORT || echo 3000)/api/health" 2>/dev/null; }
 wait_up() { for _ in $(seq 1 60); do health >/dev/null && { echo "✓ Running: $(health)"; return 0; }; sleep 3; done; echo "✗ Not answering. See: patchctl logs"; return 1; }
 
@@ -80,6 +80,31 @@ case "${1:-help}" in
     docker compose start registry
     docker image prune -f >/dev/null; docker builder prune -f --filter until=336h >/dev/null 2>&1 || true
     echo "✓ Cleaned. Disk: $(df -h . | awk 'NR==2 {print $4 " free"}')" ;;
+  licence)
+    # The licence HQ issued for this company (lib/licence.ts). It decides updates only; patch keeps
+    # working whatever happens to it.
+    grep -q 'PATCH_ROLE: hq' docker-compose.yml 2>/dev/null && { echo "This is HQ: it issues licences rather than holding one."; exit 1; }
+    grep -q 'PATCH_LICENCE_KEY' docker-compose.yml || { echo "This install's compose file is from before licences. Run the installer again (it keeps your settings), then this."; exit 1; }
+    current=$(getenv PATCH_HQ_URL)
+    read -rp "HQ's address (e.g. https://hq.yourdomain.co.uk)${current:+ [$current]}: " hq
+    hq=${hq:-$current}
+    [ -n "$hq" ] || { echo "HQ's address is needed. Nothing changed."; exit 1; }
+    case "$hq" in http://*) echo "HQ's address must start https:// (the key would otherwise cross the internet readable). Nothing changed."; exit 1 ;; https://*) ;; *) hq="https://$hq" ;; esac
+    while [ "${hq%/}" != "$hq" ]; do hq=${hq%/}; done
+    read -rsp "Licence key (hidden as you type): " key; echo
+    case "$key" in patch_*) ;; *) echo "That does not look like a licence key (they start patch_). Nothing changed."; exit 1 ;; esac
+    # A check only: HQ says what state the licence is in and records nothing. The key goes in a
+    # header read from a file descriptor, so it is never on a command line.
+    answer=$(curl -sS -m 20 -X POST -H "@"<(printf 'Authorization: Bearer %s\n' "$key") -H 'Content-Type: application/json' \
+      --data '{"check":true}' -w '\n%{http_code}' "$hq/api/hq/m/checkin" 2>/dev/null || true)
+    code=$(printf '%s' "$answer" | tail -1); body=$(printf '%s' "$answer" | sed '$d')
+    [ "$code" = 401 ] && { echo "HQ does not know that key. Nothing changed."; exit 1; }
+    [ "$code" = 200 ] || { echo "Could not reach HQ at $hq (answered ${code:-nothing}). Nothing changed."; exit 1; }
+    status=$(printf '%s' "$body" | sed -n 's/.*"status":"\([a-z]*\)".*/\1/p'); company=$(printf '%s' "$body" | sed -n 's/.*"company":"\([^"]*\)".*/\1/p')
+    [ "$status" = revoked ] && { echo "That licence ($company) has been withdrawn. Nothing changed."; exit 1; }
+    [ "$status" = ended ] && echo "Note: that licence ($company) has ended. patch works, but gets no updates until it is renewed."
+    setenv PATCH_HQ_URL "$hq"; setenv PATCH_LICENCE_KEY "$key"
+    docker compose up -d app && wait_up && echo "✓ Licensed to $company. It checks in within a couple of minutes: see Settings → Licence." ;;
   logs) docker compose logs --tail "${3:-100}" -f "${2:-app}" ;;
   restart) docker compose up -d --remove-orphans && wait_up ;;
   *)
@@ -93,6 +118,7 @@ patchctl url ADDRESS         change the public address (QR labels use it)
 patchctl access-code         replace the access code
 patchctl logs [service]      follow the logs (app, db, backup, updater, cloudflared)
 patchctl restart             apply changes made to .env
+patchctl licence             set this install's licence key and HQ's address
 patchctl clean               (HQ) free the disk taken by builds nobody can use (monthly, by cron)
 EOF
     ;;

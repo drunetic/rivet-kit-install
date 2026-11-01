@@ -27,6 +27,10 @@ services:
       PATCH_ACCESS_CODE: ${PATCH_ACCESS_CODE:-${RIVET_ACCESS_CODE:-}}
       PATCH_IMAGE: ${PATCH_IMAGE:-${RIVET_IMAGE:-ghcr.io/drunetic/patch}}
       PATCH_VERSION: ${PATCH_VERSION:-${RIVET_VERSION:-latest}}
+      # This install's licence (lib/licence.ts): HQ's address and the key HQ issued. Set with
+      # `patchctl licence`; empty for an install that has none.
+      PATCH_HQ_URL: ${PATCH_HQ_URL:-}
+      PATCH_LICENCE_KEY: ${PATCH_LICENCE_KEY:-}
       TZ: ${TZ:-Europe/London}
       DIGEST_HOUR: ${DIGEST_HOUR:-7}
       FILE_STORAGE_DIR: /data/files
