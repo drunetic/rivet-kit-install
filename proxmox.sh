@@ -3,12 +3,18 @@
 #
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/drunetic/rivet-kit-install/main/proxmox.sh)"
 #
+# With PATCH_ROLE=hq in front it makes patch HQ instead (the box that builds patch and hands out
+# updates; docs/hq.md): a bigger container, a GitHub token rather than an access code, and
+# hq-install.sh inside rather than install.sh.
+#
 # Creates an unprivileged Debian LXC container with Docker in it, then runs install.sh inside.
 # Nothing is installed on the Proxmox host itself: Docker on a hypervisor rewrites its firewall
 # and can cut the other guests off the network.
 set -euo pipefail
 
 SOURCE=${PATCH_SOURCE:-https://raw.githubusercontent.com/drunetic/rivet-kit-install/main}
+ROLE=${PATCH_ROLE:-}
+[ -z "$ROLE" ] || [ "$ROLE" = hq ] || { echo "PATCH_ROLE is either hq or not set."; exit 1; }
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 say() { printf '  %s\n' "$*"; }
 die() { printf '\n\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
@@ -22,8 +28,16 @@ ask() {  # ask VAR "Question" [default] [secret]
 
 command -v pct >/dev/null && command -v pveam >/dev/null || die "This is for the Proxmox host's shell. On any other Debian/Ubuntu machine use install.sh."
 [ "$(id -u)" = 0 ] || die "Run as root."
-bold "patch. for Proxmox"
-say "This creates a small container for patch. Press Enter to accept a [default]."
+if [ "$ROLE" = hq ]; then
+  bold "patch HQ for Proxmox"
+  say "This creates the container that builds patch and hands out its updates. Press Enter to accept a [default]."
+  # Building patch wants memory and cores; every release ever built is kept in the image store.
+  NAME_D=patch-hq; DISK_D=60; RAM_D=4096; CORES_D=4
+else
+  bold "patch. for Proxmox"
+  say "This creates a small container for patch. Press Enter to accept a [default]."
+  NAME_D='patch'; DISK_D=16; RAM_D=2048; CORES_D=2
+fi
 echo
 
 CTID_DEFAULT=$(pvesh get /cluster/nextid)
@@ -32,11 +46,11 @@ TMPL_STORAGE=$(pvesm status -content vztmpl 2>/dev/null | awk 'NR>1 && $3=="acti
 [ -n "$TMPL_STORAGE" ] || die "No storage on this host accepts container templates (vztmpl)."
 
 ask CTID "Container ID" "$CTID_DEFAULT"
-ask CT_NAME "Name" "patch"
+ask CT_NAME "Name" "$NAME_D"
 ask CT_STORAGE "Storage for its disk" "${ROOT_STORAGE_DEFAULT:-local-lvm}"
-ask CT_DISK "Disk size in GB (photos are what grow)" "16"
-ask CT_RAM "Memory in MB" "2048"
-ask CT_CORES "CPU cores" "2"
+ask CT_DISK "Disk size in GB ($([ "$ROLE" = hq ] && echo 'every release is kept' || echo 'photos are what grow'))" "$DISK_D"
+ask CT_RAM "Memory in MB" "$RAM_D"
+ask CT_CORES "CPU cores" "$CORES_D"
 ask CT_BRIDGE "Network bridge" "vmbr0"
 echo
 # Its address is settled here, before anything is installed: with no tunnel, patch records the
@@ -72,20 +86,38 @@ if awk '$1=="nameserver" {print $2}' /etc/resolv.conf 2>/dev/null | grep -Eq '^(
   say "This host's DNS only works on the host (Tailscale or a local resolver), so the container uses $CT_DNS."
 fi
 echo
-say "patch is private: you need the access code you were given (it starts ghp_)."
-ask PATCH_ACCESS_CODE "Access code" "" secret
-[ -n "$PATCH_ACCESS_CODE" ] || die "An access code is needed."
-echo
-say "How will people reach it?"
-say "  1) Only on this network            (you can add remote access later: patchctl tunnel)"
-say "  2) From anywhere, via a Cloudflare Tunnel (needed for the phone camera scanner)"
-ask MODE "Choose 1 or 2" 1
-PATCH_TUNNEL=''; PATCH_URL=''
-if [ "$MODE" = 2 ]; then
-  say "In Cloudflare: Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared → Docker."
-  say "Copy the whole 'docker run …' command it shows and paste it here."
-  ask PATCH_TUNNEL "Cloudflare's command"
-  ask PATCH_URL "The address you will give it in Cloudflare, e.g. kit.yourdomain.co.uk"
+PATCH_TUNNEL=''; PATCH_URL=''; PATCH_IMAGES_URL=''; GITHUB_TOKEN=${GITHUB_TOKEN:-}; PATCH_ACCESS_CODE=${PATCH_ACCESS_CODE:-}
+if [ "$ROLE" = hq ]; then
+  say "HQ builds patch from its code, so it needs a GitHub token that can only read it:"
+  say "GitHub → Settings → Developer settings → Fine-grained tokens; repository drunetic/Rivet-Kit only,"
+  say "permission Contents: Read-only."
+  ask GITHUB_TOKEN "GitHub token" "" secret
+  [ -n "$GITHUB_TOKEN" ] || die "A GitHub token is needed."
+  echo
+  say "Installs reach HQ through a Cloudflare Tunnel on two addresses (HQ's, and one for images)."
+  say "  1) Not yet       (add it later inside the container: patchctl tunnel)"
+  say "  2) Now           (Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared → Docker)"
+  ask MODE "Choose 1 or 2" 1
+  if [ "$MODE" = 2 ]; then
+    ask PATCH_TUNNEL "Cloudflare's 'docker run …' command"
+    ask PATCH_URL "HQ's address, e.g. hq.yourdomain.co.uk"
+    ask PATCH_IMAGES_URL "The images address, e.g. images.yourdomain.co.uk"
+  fi
+else
+  say "patch is private: you need the access code you were given (it starts ghp_)."
+  ask PATCH_ACCESS_CODE "Access code" "" secret
+  [ -n "$PATCH_ACCESS_CODE" ] || die "An access code is needed."
+  echo
+  say "How will people reach it?"
+  say "  1) Only on this network            (you can add remote access later: patchctl tunnel)"
+  say "  2) From anywhere, via a Cloudflare Tunnel (needed for the phone camera scanner)"
+  ask MODE "Choose 1 or 2" 1
+  if [ "$MODE" = 2 ]; then
+    say "In Cloudflare: Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared → Docker."
+    say "Copy the whole 'docker run …' command it shows and paste it here."
+    ask PATCH_TUNNEL "Cloudflare's command"
+    ask PATCH_URL "The address you will give it in Cloudflare, e.g. kit.yourdomain.co.uk"
+  fi
 fi
 
 # ── Template ────────────────────────────────────────────────────────────────────────────────────
@@ -111,7 +143,7 @@ pct create "$CTID" "$TMPL_STORAGE:vztmpl/$TEMPLATE" --arch "$ARCH" \
   --rootfs "$CT_STORAGE:$CT_DISK" --net0 "$NET0" \
   ${CT_DNS:+--nameserver "$CT_DNS"} \
   --unprivileged 1 --features nesting=1,keyctl=1 --onboot 1 --ostype debian \
-  --tags patch --description "patch. Manage from inside: pct enter $CTID, then patchctl help" >/dev/null
+  --tags "patch${ROLE:+-$ROLE}" --description "patch. Manage from inside: pct enter $CTID, then patchctl help" >/dev/null
 pct start "$CTID"
 
 say "Waiting for its network…"
@@ -123,12 +155,13 @@ done
 
 say "Preparing it (a few minutes)…"
 pct exec "$CTID" -- bash -c "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates >/dev/null"
-pct exec "$CTID" -- bash -c "curl -fsSL '$SOURCE/install.sh' -o /root/install.sh"
+INSTALLER=$([ "$ROLE" = hq ] && echo hq-install.sh || echo install.sh)
+pct exec "$CTID" -- bash -c "curl -fsSL '$SOURCE/$INSTALLER' -o /root/install.sh"
 
 # Answers go in as environment variables: pct exec gives the installer no terminal to ask on. They
 # are exported rather than put on the command line (pct exec passes the environment through), so
 # the access code and tunnel token never appear in the host's process list.
-export PATCH_ACCESS_CODE PATCH_TUNNEL PATCH_URL PATCH_SOURCE="$SOURCE"
+export PATCH_ACCESS_CODE PATCH_TUNNEL PATCH_URL PATCH_IMAGES_URL GITHUB_TOKEN PATCH_SOURCE="$SOURCE"
 pct exec "$CTID" -- bash /root/install.sh || {
   echo
   say "The install inside the container stopped. Its output is above."
@@ -140,6 +173,6 @@ pct exec "$CTID" -- bash /root/install.sh || {
 
 IP=$(pct exec "$CTID" -- hostname -I | awk '{print $1}')
 echo
-bold "✓ Container $CTID is running patch at http://$IP:3000"
+bold "✓ Container $CTID is running $([ "$ROLE" = hq ] && echo 'patch HQ' || echo patch) at http://$IP:3000"
 [ "$CT_IP" = dhcp ] && say "Give it a fixed address: reserve $IP for '$CT_NAME' on your router."
 say "Manage it from here:  pct enter $CTID   then   patchctl help"

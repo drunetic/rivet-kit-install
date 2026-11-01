@@ -54,7 +54,13 @@ case "${1:-help}" in
     setenv TUNNEL_TOKEN "$token"; setenv COMPOSE_PROFILES tunnel; setenv TRUST_CLOUDFLARE_HEADERS 1
     [ -n "$host" ] && setenv PUBLIC_BASE_URL "https://$host"
     docker compose up -d --remove-orphans
-    echo "✓ Tunnel connector started. In Cloudflare, add a route: hostname $host → HTTP, app:3000" ;;
+    echo "✓ Tunnel connector started. In Cloudflare, add a route: hostname $host → HTTP, app:3000"
+    # HQ has a second address, for installs to download images from (docs/hq.md).
+    if grep -q 'PATCH_ROLE: hq' docker-compose.yml 2>/dev/null; then
+      read -rp "The images address (e.g. images.yourdomain.co.uk): " images
+      images=${images#https://}; images=${images%/}
+      [ -n "$images" ] && setenv HQ_IMAGES_ADDRESS "$images" && echo "  and a second: hostname $images → HTTP, front:8080"
+    fi ;;
   url)
     [ -n "${2:-}" ] || { echo "Usage: patchctl url https://kit.yourdomain.co.uk"; exit 1; }
     setenv PUBLIC_BASE_URL "${2%/}"; docker compose up -d && wait_up ;;
@@ -62,6 +68,18 @@ case "${1:-help}" in
     read -rsp "New access code (hidden as you type): " code; echo
     printf '%s' "$code" | docker login ghcr.io -u "$REGISTRY_USER" --password-stdin >/dev/null || { echo "Not accepted. Nothing changed."; exit 1; }
     setenv "$CODE_KEY" "$code"; docker compose up -d app && echo "✓ Access code updated" ;;
+  clean)
+    # HQ only: give back the disk taken by builds nobody can use any more. Its image store frees
+    # space only when stopped and swept, so this waits until nothing is being built, stops the
+    # store for a minute, sweeps it and starts it again. Run monthly by cron on HQ.
+    grep -q 'PATCH_ROLE: hq' docker-compose.yml 2>/dev/null || { echo "clean is for patch HQ."; exit 1; }
+    busy=$(docker compose exec -T db psql -U rivet -d rivetkit -Atc "SELECT COUNT(*) FROM hq_builds WHERE state = 'building'" 2>/dev/null || echo 1)
+    [ "$busy" = 0 ] || { echo "A build is running; try again later."; exit 1; }
+    docker compose stop registry
+    docker compose run --rm --no-deps -T --entrypoint registry registry garbage-collect --delete-untagged /etc/distribution/config.yml | tail -3 || true
+    docker compose start registry
+    docker image prune -f >/dev/null; docker builder prune -f --filter until=336h >/dev/null 2>&1 || true
+    echo "✓ Cleaned. Disk: $(df -h . | awk 'NR==2 {print $4 " free"}')" ;;
   logs) docker compose logs --tail "${3:-100}" -f "${2:-app}" ;;
   restart) docker compose up -d --remove-orphans && wait_up ;;
   *)
@@ -75,6 +93,7 @@ patchctl url ADDRESS         change the public address (QR labels use it)
 patchctl access-code         replace the access code
 patchctl logs [service]      follow the logs (app, db, backup, updater, cloudflared)
 patchctl restart             apply changes made to .env
+patchctl clean               (HQ) free the disk taken by builds nobody can use (monthly, by cron)
 EOF
     ;;
 esac
