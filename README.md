@@ -1,8 +1,8 @@
 # patch. installers
 
 Installers for **patch.**, private kit-tracking and production software. These scripts contain
-none of patch itself: they download it with an **access code**, and only people who have been
-given one can install it. There is no public download, no sign-up and no support beyond the people
+none of patch itself: they download it with a **licence key** (it starts `patch_`), and only people
+who have been given one can install it. There is no public download, no sign-up and no support beyond the people
 who gave you your code.
 
 ## Proxmox VE
@@ -13,8 +13,9 @@ In the **Proxmox host's** shell (Datacenter → your node → Shell):
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/drunetic/rivet-kit-install/main/proxmox.sh)"
 ```
 
-It creates a small Debian container with Docker in it and installs patch there. Nothing is
-installed on the Proxmox host.
+It asks for your licence key, then offers **Defaults** or **Advanced** for the container (size,
+storage, network). It creates a small Debian container with Docker in it and installs patch there.
+Nothing is installed on the Proxmox host. Everything else is done in your browser afterwards.
 
 ## Any Debian or Ubuntu machine (VM, mini PC, Hyper-V guest)
 
@@ -44,9 +45,10 @@ Docker does not run Linux containers natively on Windows Server.
 
 ## After installing
 
-Open the address it prints. The first visit makes the first account. On the server, `patchctl help`
-lists everything else: updates, backups, adding a Cloudflare Tunnel, logs. Instance admins also get
-**Settings → Updates** in the app, which installs new versions with one button.
+Open the address it prints (or scan its QR code on a phone). The first visit makes your account,
+then offers remote access through a Cloudflare Tunnel, so phones can reach patch from anywhere.
+Instance admins also get **Settings → Updates**, **Licence** and **Remote access** in the app. On
+the server, `patchctl help` lists the same jobs for when the app cannot be reached.
 
 ## Licence
 

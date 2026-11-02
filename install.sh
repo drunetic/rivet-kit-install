@@ -3,10 +3,12 @@
 #
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/drunetic/rivet-kit-install/main/install.sh)"
 #
-# Installs Docker if it is missing, asks for the company's licence key (or an older access code) and how patch will be
-# reached, writes /opt/patch/{docker-compose.yml,.env}, starts it, and adds the `patchctl`
+# Installs Docker if it is missing, asks for the company's licence key (or an older access code),
+# writes /opt/patch/{docker-compose.yml,.env}, starts it, and adds the `patchctl`
 # command for later jobs (update, backup, tunnel, logs). Safe to run again: an existing .env is kept.
 # (`patchctl`, not `patch`: /usr/bin/patch is the standard diff tool that apt and friends rely on.)
+#
+# Everything else (remote access, the first account) is done in the browser afterwards (0.75).
 #
 # Non-interactive (the Proxmox script uses this): set PATCH_LICENCE_KEY and PATCH_HQ_URL (or, for an
 # install still on GitHub's registry, PATCH_ACCESS_CODE), and optionally PATCH_TUNNEL
@@ -18,6 +20,8 @@ SOURCE=${PATCH_SOURCE:-https://raw.githubusercontent.com/drunetic/rivet-kit-inst
 # updates it rather than starting a second, empty install beside it (patchctl chooses the same way).
 DIR=${PATCH_DIR:-$( [ -d /opt/patch ] || [ ! -d /opt/rivet-kit ] && echo /opt/patch || echo /opt/rivet-kit )}
 REGISTRY_USER=${PATCH_REGISTRY_USER:-drunetic}
+# The HQ these installers are published by, so a licence key is all anyone is asked for.
+BUILT_IN_HQ=${PATCH_BUILT_IN_HQ:-https://hq.andrewhaslam.co.uk}
 PORT=${PATCH_PORT:-3000}
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
@@ -72,6 +76,7 @@ fi
 PATCH_LICENCE_KEY=${PATCH_LICENCE_KEY:-}; PATCH_ACCESS_CODE=${PATCH_ACCESS_CODE:-}; IMAGES=''
 if [ -n "$PATCH_LICENCE_KEY" ]; then
   case "$PATCH_LICENCE_KEY" in patch_*) ;; *) die "That does not look like a licence key (they start patch_)." ;; esac
+  PATCH_HQ_URL=${PATCH_HQ_URL:-$BUILT_IN_HQ}
   ask PATCH_HQ_URL "HQ's address, as given with the key (e.g. hq.example.co.uk)"
   PATCH_HQ_URL=$(hq_url "$PATCH_HQ_URL") || die "That is not an address like hq.example.co.uk."
   # Asked as a check only: HQ says whose licence it is, its state and where to download from, and
@@ -116,19 +121,9 @@ if [ -f .env ]; then
     setenv PATCH_ACCESS_CODE "$PATCH_ACCESS_CODE"
   fi
 else
-  if [ -z "${PATCH_TUNNEL+x}" ]; then
-    echo
-    say "How will people reach patch?"
-    say "  1) Only on this network, at http://$IP:$PORT   (you can add remote access later: patchctl tunnel)"
-    say "  2) From anywhere, through a Cloudflare Tunnel   (needed for the phone camera scanner)"
-    ask MODE "Choose 1 or 2" 1
-    PATCH_TUNNEL=''
-    if [ "$MODE" = 2 ]; then
-      say "In Cloudflare: Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared → Docker."
-      say "Copy the whole 'docker run …' command it shows and paste it here."
-      ask PATCH_TUNNEL "Cloudflare's command"
-    fi
-  fi
+  # Remote access is set up in the browser now (Settings → Remote access); a tunnel given here, by
+  # the Proxmox script or by hand, is still used.
+  PATCH_TUNNEL=${PATCH_TUNNEL:-}
   TUNNEL_TOKEN=$( [ -n "$PATCH_TUNNEL" ] && token_from "$PATCH_TUNNEL" || true )
   if [ -n "$TUNNEL_TOKEN" ]; then
     case "$TUNNEL_TOKEN" in eyJ*) ;; *) die "That does not look like a tunnel token (they start eyJ)." ;; esac
@@ -175,9 +170,10 @@ for _ in $(seq 1 60); do
     URL=$(grep '^PUBLIC_BASE_URL=' .env | cut -d= -f2-)
     echo
     bold "✓ patch. is running"
-    say "On this network:  http://$IP:$PORT"
+    say "Open it to finish setting up:  http://$IP:$PORT"
     [ "${URL#https://}" != "$URL" ] && say "From anywhere:    $URL   (once the hostname is added in Cloudflare)"
-    say "Open it and the setup page makes the first account."
+    # A QR code, for opening it on a phone or tablet without typing the address.
+    command -v qrencode >/dev/null && { echo; qrencode -t ansiutf8 -m 2 "http://$IP:$PORT" | sed 's/^/  /'; }
     say "Later jobs: patchctl update | backup | tunnel | logs | status   (patchctl help)"
     exit 0
   fi
