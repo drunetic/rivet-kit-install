@@ -159,6 +159,8 @@ fi
 # ── Files and start ─────────────────────────────────────────────────────────────────────────────
 curl -fsSL "$SOURCE/docker-compose.yml" -o docker-compose.yml.new && mv docker-compose.yml.new docker-compose.yml
 curl -fsSL "$SOURCE/patchctl" -o /usr/local/bin/patchctl && chmod +x /usr/local/bin/patchctl
+# `pct enter` can start a shell without /usr/local/bin on its PATH; /usr/bin is always there.
+ln -sf /usr/local/bin/patchctl /usr/bin/patchctl
 # Backups hold the database and the app's own secrets: root only.
 mkdir -p backups && chmod 0700 backups
 PORT=$(grep '^APP_PORT=' .env | cut -d= -f2- || true); PORT=${PORT:-3000}

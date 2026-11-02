@@ -141,6 +141,8 @@ fi
 cp "$SRC/hq/docker-compose.yml" docker-compose.yml
 cp "$SRC/hq/registry.yml" registry.yml
 cp "$SRC/install/patchctl" /usr/local/bin/patchctl && chmod +x /usr/local/bin/patchctl
+# `pct enter` can start a shell without /usr/local/bin on its PATH; /usr/bin is always there.
+ln -sf /usr/local/bin/patchctl /usr/bin/patchctl
 # Backups hold the database and the signing keys: root only.
 mkdir -p backups && chmod 0700 backups
 # Once a month, at a quiet hour, free the space old builds took (patchctl clean).

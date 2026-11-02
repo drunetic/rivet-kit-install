@@ -88,6 +88,8 @@ case "${1:-help}" in
     grep -q 'PATCH_ROLE: hq' docker-compose.yml 2>/dev/null && { echo "This is HQ: it issues licences rather than holding one."; exit 1; }
     grep -q 'PATCH_LICENCE_KEY' docker-compose.yml || { echo "This install's compose file is from before licences. Run the installer again (it keeps your settings), then this."; exit 1; }
     current=$(getenv PATCH_HQ_URL)
+    # An image HQ built knows HQ's address (0.74), so it can be offered rather than typed.
+    [ -n "$current" ] || current=$(docker compose exec -T app printenv PATCH_DEFAULT_HQ_URL 2>/dev/null | tr -d '\r' || true)
     read -rp "HQ's address (e.g. https://hq.yourdomain.co.uk)${current:+ [$current]}: " hq
     hq=${hq:-$current}
     [ -n "$hq" ] || { echo "HQ's address is needed. Nothing changed."; exit 1; }
