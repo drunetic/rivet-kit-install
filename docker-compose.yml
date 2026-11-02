@@ -32,6 +32,8 @@ services:
       # `patchctl licence`; empty for an install that has none.
       PATCH_HQ_URL: ${PATCH_HQ_URL:-}
       PATCH_LICENCE_KEY: ${PATCH_LICENCE_KEY:-}
+      # A hosted instance's first-run code (0.76): /setup asks for it, so the first account is the customer's.
+      PATCH_SETUP_CODE: ${PATCH_SETUP_CODE:-}
       TZ: ${TZ:-Europe/London}
       DIGEST_HOUR: ${DIGEST_HOUR:-7}
       FILE_STORAGE_DIR: /data/files

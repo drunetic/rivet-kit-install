@@ -106,7 +106,9 @@ if [ "$ROLE" != hq ]; then
 fi
 
 STORAGE_D=${ROOT_STORAGE_DEFAULT:-local-lvm}
-# Not asked when the container's settings were given in the environment (a scripted run).
+# Not asked when the container's settings were given in the environment (a scripted run), nor when
+# HQ is making a hosted instance (PATCH_UNATTENDED, from install/hosting-host.sh): defaults for the rest.
+[ -n "${PATCH_UNATTENDED:-}" ] && SETUP=1
 [ -n "${CTID:-}" ] && SETUP=${SETUP:-advanced}
 choose SETUP "How should the container be made?" 1 \
   1 "Defaults: ID $CTID_DEFAULT, ${DISK_D} GB disk on $STORAGE_D, $((RAM_D / 1024)) GB memory, $CORES_D cores, DHCP" \
@@ -197,7 +199,7 @@ pct create "$CTID" "$TMPL_STORAGE:vztmpl/$TEMPLATE" --arch "$ARCH" \
   --rootfs "$CT_STORAGE:$CT_DISK" --net0 "$NET0" \
   ${CT_DNS:+--nameserver "$CT_DNS"} \
   --unprivileged 1 --features nesting=1,keyctl=1 --onboot 1 --ostype debian \
-  --tags "patch${ROLE:+-$ROLE}" --description "patch. Manage from inside: pct enter $CTID, then patchctl help" >/dev/null
+  --tags "${CT_TAGS:-patch${ROLE:+-$ROLE}}" --description "patch. Manage from inside: pct enter $CTID, then patchctl help" >/dev/null
 pct start "$CTID"
 
 say "Waiting for its network…"
@@ -215,7 +217,8 @@ pct exec "$CTID" -- bash -c "curl -fsSL '$SOURCE/$INSTALLER' -o /root/install.sh
 # Answers go in as environment variables: pct exec gives the installer no terminal to ask on. They
 # are exported rather than put on the command line (pct exec passes the environment through), so
 # the access code and tunnel token never appear in the host's process list.
-export PATCH_ACCESS_CODE PATCH_LICENCE_KEY PATCH_HQ_URL PATCH_TUNNEL PATCH_URL PATCH_IMAGES_URL GITHUB_TOKEN PATCH_SOURCE="$SOURCE"
+PATCH_SETUP_CODE=${PATCH_SETUP_CODE:-}; PATCH_TRUST_CLOUDFLARE=${PATCH_TRUST_CLOUDFLARE:-}
+export PATCH_ACCESS_CODE PATCH_LICENCE_KEY PATCH_HQ_URL PATCH_TUNNEL PATCH_URL PATCH_IMAGES_URL GITHUB_TOKEN PATCH_SETUP_CODE PATCH_TRUST_CLOUDFLARE PATCH_SOURCE="$SOURCE"
 pct exec "$CTID" -- bash /root/install.sh || {
   echo
   say "The install inside the container stopped. Its output is above."
@@ -226,6 +229,8 @@ pct exec "$CTID" -- bash /root/install.sh || {
 }
 
 IP=$(pct exec "$CTID" -- hostname -I | awk '{print $1}')
+# For HQ's builder, which reads this line to know what was made (scripts/builder.sh).
+[ -n "${PATCH_UNATTENDED:-}" ] && echo "PATCH_RESULT ctid=$CTID ip=$IP"
 echo
 bold "✓ Container $CTID is running $([ "$ROLE" = hq ] && echo 'patch HQ' || echo patch) at http://$IP:3000"
 if [ "$ROLE" != hq ]; then

@@ -148,6 +148,10 @@ TRUST_CLOUDFLARE_HEADERS=$([ -n "$TUNNEL_TOKEN" ] && echo 1 || echo 0)
 COMPOSE_PROFILES=$([ -n "$TUNNEL_TOKEN" ] && echo tunnel || true)
 TUNNEL_TOKEN=$TUNNEL_TOKEN
 EOF
+  # A hosted instance (made by HQ, 0.76): reached through HQ's tunnel, so Cloudflare's note of the
+  # caller is trusted, and its first account needs the code HQ gave the customer.
+  [ -n "${PATCH_TRUST_CLOUDFLARE:-}" ] && setenv TRUST_CLOUDFLARE_HEADERS 1
+  [ -n "${PATCH_SETUP_CODE:-}" ] && setenv PATCH_SETUP_CODE "$PATCH_SETUP_CODE"
   umask 022
 fi
 
