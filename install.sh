@@ -151,6 +151,8 @@ EOF
   # A hosted instance (made by HQ, 0.76): reached through HQ's tunnel, so Cloudflare's note of the
   # caller is trusted, and its first account needs the code HQ gave the customer.
   [ -n "${PATCH_TRUST_CLOUDFLARE:-}" ] && setenv TRUST_CLOUDFLARE_HEADERS 1
+  # The customer's admin runs their business, not this server: no tunnel or licence changes from the app.
+  [ -n "${PATCH_TRUST_CLOUDFLARE:-}" ] && setenv PATCH_HOSTED 1
   [ -n "${PATCH_SETUP_CODE:-}" ] && setenv PATCH_SETUP_CODE "$PATCH_SETUP_CODE"
   umask 022
 fi

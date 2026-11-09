@@ -8,7 +8,7 @@
 #      Registry: the images address    Username: licence    Password: your licence key
 # 2. Apps → Discover Apps → ⋮ → Install via YAML. Name it patch and paste this file.
 # 3. Before saving, replace every CHANGE-ME below:
-#      CHANGE-ME-images-address (three times)   the images address, e.g. images.example.co.uk
+#      CHANGE-ME-images-address (four times)    the images address, e.g. images.example.co.uk
 #      CHANGE-ME-hq-address                     HQ's address, e.g. hq.example.co.uk
 #      CHANGE-ME-licence-key                    the licence key
 #      CHANGE-ME-database-password (three times) the same long random password each time,
@@ -38,13 +38,15 @@ services:
       PUBLIC_BASE_URL: http://CHANGE-ME-truenas-ip:3000
       FILE_STORAGE_DIR: /data/files
       TZ: Europe/London
-      # Behind a Cloudflare Tunnel, set these and add the cloudflared service at the bottom:
+      # Behind a Cloudflare Tunnel, set these, uncomment `networks:` below the volumes and the
+      # tunnel section at the bottom:
       # PUBLIC_BASE_URL: https://kit.yourdomain.co.uk
       # TRUST_CLOUDFLARE_HEADERS: "1"
     ports:
       - "3000:3000"
     volumes:
       - files:/data/files
+    # networks: [default, tunnel]
     depends_on:
       db:
         condition: service_healthy
@@ -86,13 +88,39 @@ services:
       db:
         condition: service_healthy
 
+  # Behind a Cloudflare Tunnel: uncomment these two services, `networks:` on the app above and the
+  # networks block at the bottom. Add the gate on any TrueNAS app with a tunnel: there is no updater
+  # here to warn when it is missing. The gate shuts the
+  # connector in with patch: however the tunnel is set up in Cloudflare, it cannot reach this box,
+  # your network or any other app. Without the gate it could reach all of them.
+  # tunnel-gate:
+  #   image: CHANGE-ME-images-address/patch-updater:latest
+  #   restart: unless-stopped
+  #   entrypoint: ["/bin/sh", "/tunnel-gate.sh"]
+  #   cap_add: [NET_ADMIN]
+  #   dns: [1.1.1.1, 1.0.0.1]
+  #   tmpfs: [/run/gate]
+  #   networks: [tunnel]
+  #   healthcheck:
+  #     test: ["CMD", "test", "-f", "/run/gate/ready"]
+  #     interval: 3s
+  #     retries: 20
   # cloudflared:
   #   image: cloudflare/cloudflared:latest
   #   restart: unless-stopped
-  #   command: tunnel --no-autoupdate run
+  #   command: tunnel --no-autoupdate --edge-ip-version 4 run
   #   environment:
   #     TUNNEL_TOKEN: paste the token (the eyJ… part of Cloudflare's docker command)
-  #   depends_on: [app]
+  #   network_mode: service:tunnel-gate
+  #   depends_on:
+  #     tunnel-gate:
+  #       condition: service_healthy
+  #     app:
+  #       condition: service_started
+
+# networks:
+#   default:
+#   tunnel:
 
 volumes:
   pgdata:

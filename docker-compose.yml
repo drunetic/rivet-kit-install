@@ -34,6 +34,8 @@ services:
       PATCH_LICENCE_KEY: ${PATCH_LICENCE_KEY:-}
       # A hosted instance's first-run code (0.76): /setup asks for it, so the first account is the customer's.
       PATCH_SETUP_CODE: ${PATCH_SETUP_CODE:-}
+      # Set on instances HQ makes for customers (0.104): their admins cannot change the server itself.
+      PATCH_HOSTED: ${PATCH_HOSTED:-}
       TZ: ${TZ:-Europe/London}
       DIGEST_HOUR: ${DIGEST_HOUR:-7}
       FILE_STORAGE_DIR: /data/files
@@ -41,6 +43,7 @@ services:
       UPDATER_STATUS_DIR: /data/updater-status
     ports:
       - "${APP_PORT:-3000}:3000"
+    networks: [default, tunnel]
     volumes:
       - files:/data/files
       - updater-request:/data/updater-request
@@ -105,16 +108,45 @@ services:
       - updater-request:/updater-request
       - updater-status:/updater-status
 
+  # The tunnel gate (0.105, scripts/tunnel-gate.sh). The connector below lives in this container's
+  # network, which is closed to everything but patch (on the tunnel network) and Cloudflare itself.
+  # However the tunnel is set up in Cloudflare, it cannot reach the host, the local network or any
+  # other container. If the gate cannot close, it never becomes healthy and the connector never starts.
+  tunnel-gate:
+    image: ${PATCH_UPDATER_IMAGE:-${RIVET_UPDATER_IMAGE:-ghcr.io/drunetic/patch-updater}}:latest
+    profiles: [tunnel]
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/tunnel-gate.sh"]
+    cap_add: [NET_ADMIN]
+    # Outside names through Cloudflare, not the router: the gate allows DNS to these two only.
+    dns: [1.1.1.1, 1.0.0.1]
+    tmpfs: [/run/gate]
+    networks: [tunnel]
+    healthcheck:
+      test: ["CMD", "test", "-f", "/run/gate/ready"]
+      interval: 3s
+      retries: 20
+
   # Cloudflare Tunnel connector. Off unless COMPOSE_PROFILES=tunnel, so a box on the LAN only, or
-  # one behind another proxy, needs no token.
+  # one behind another proxy, needs no token. In Cloudflare, its route goes to HTTP app:3000.
   cloudflared:
     image: cloudflare/cloudflared:latest
     profiles: [tunnel]
     restart: unless-stopped
-    command: tunnel --no-autoupdate run
+    command: tunnel --no-autoupdate --edge-ip-version 4 run
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
-    depends_on: [app]
+    network_mode: service:tunnel-gate
+    depends_on:
+      tunnel-gate:
+        condition: service_healthy
+      app:
+        condition: service_started
+
+networks:
+  default:
+  # Only patch and the tunnel gate are on it: the one place the connector may go.
+  tunnel:
 
 volumes:
   pgdata:

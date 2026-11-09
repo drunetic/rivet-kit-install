@@ -19,7 +19,15 @@ setenv() {  # setenv NAME value — replaces the line in .env, or adds it
 }
 getenv() { grep "^$1=" .env 2>/dev/null | tail -1 | cut -d= -f2- || true; }
 health() { curl -fsS -m 3 "http://127.0.0.1:$(getenv APP_PORT || echo 3000)/api/health" 2>/dev/null; }
-wait_up() { for _ in $(seq 1 60); do health >/dev/null && { echo "✓ Running: $(health)"; return 0; }; sleep 3; done; echo "✗ Not answering. See: patchctl logs"; return 1; }
+wait_up() {
+  for _ in $(seq 1 60); do health >/dev/null && { echo "✓ Running: $(health)"; return 0; }; sleep 3; done
+  # Answering, but its database setup did not finish (0.106): not the same as not answering.
+  case "$(curl -sS -m 3 "http://127.0.0.1:$(getenv APP_PORT || echo 3000)/api/health" 2>/dev/null)" in
+    *'"schema":{"ok":false}'*) echo "✗ Running, but part of its database setup did not finish. See: patchctl logs" ;;
+    *) echo "✗ Not answering. See: patchctl logs" ;;
+  esac
+  return 1
+}
 
 case "${1:-help}" in
   status)
@@ -36,16 +44,33 @@ case "${1:-help}" in
   restore)
     dump=${2:-}; files=${3:-}
     [ -f "$dump" ] || { echo "Usage: patchctl restore backups/patch-<date>.dump [backups/files-<date>.tar.gz]"; exit 1; }
+    [ -z "$files" ] || [ -f "$files" ] || { echo "No such file: $files"; exit 1; }
+    # Checked before anything is touched.
+    [ "$(head -c 5 "$dump")" = PGDMP ] || { echo "$dump is not a patch database backup. Nothing changed."; exit 1; }
+    [ -z "$files" ] || gzip -t "$files" 2>/dev/null || { echo "$files is damaged or not a files backup. Nothing changed."; exit 1; }
+    # The safe way (0.106) lives in the image: unpacked beside the live data, swapped in, the old kept.
+    docker compose run --rm -T --no-deps --entrypoint test backup -f /app/scripts/restore-inside.sh \
+      || { echo "This version of patch restores the old, riskier way. Run patchctl update first. Nothing changed."; exit 1; }
     echo "This REPLACES everything in patch with that backup. Type RESTORE to carry on:"; read -r a
     [ "$a" = RESTORE ] || { echo "Nothing changed."; exit 1; }
-    docker compose stop app backup
-    docker compose exec -T db psql -U rivet -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS rivetkit WITH (FORCE)" -c "CREATE DATABASE rivetkit OWNER rivet"
-    docker compose exec -T db pg_restore -U rivet -d rivetkit --no-owner --exit-on-error < "$dump"
-    if [ -n "$files" ]; then
-      docker compose run --rm -T --no-deps --entrypoint sh backup -c 'find /files -mindepth 1 -delete && tar -xzf - -C /files' < "$files"
-    fi
-    docker compose up -d && wait_up ;;
+    for f in "$dump" ${files:+"$files"}; do
+      case "$(cd "$(dirname "$f")" && pwd)" in "$(pwd)/backups") ;; *)
+        if [ -e "backups/$(basename "$f")" ]; then cmp -s "$f" "backups/$(basename "$f")" || { echo "backups/ already has a different $(basename "$f"). Rename one. Nothing changed."; exit 1; }
+        else cp "$f" backups/ || { echo "Could not copy $f into backups/ (is the disk full?). Nothing changed."; exit 1; }; fi ;;
+      esac
+    done
+    docker compose stop app backup updater 2>/dev/null || docker compose stop app backup
+    docker compose up -d db
+    until docker compose exec -T db pg_isready -U rivet -d postgres >/dev/null 2>&1; do sleep 1; done
+    rc=0; docker compose run --rm -T --no-deps --entrypoint sh backup /app/scripts/restore-inside.sh "/backups/$(basename "$dump")" ${files:+"/backups/$(basename "$files")"} || rc=$?
+    [ $rc = 2 ] && exit 2
+    # Restored but not started is not a success.
+    docker compose up -d || { echo "Restored, but patch did not start. See: patchctl logs"; exit 1; }
+    wait_up || exit 1; exit $rc ;;
   tunnel)
+    # No gate, no tunnel (0.105): without it the connector could be pointed at anything on this network.
+    COMPOSE_PROFILES=tunnel docker compose config --services 2>/dev/null | grep -qx tunnel-gate \
+      || { echo "This install's setup is from before the tunnel gate. Run the installer again (it keeps your settings), then try again."; exit 1; }
     echo "In Cloudflare: Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared → Docker."
     echo "Copy the whole 'docker run …' command it shows and paste it here, then press Enter:"
     read -r cmd
